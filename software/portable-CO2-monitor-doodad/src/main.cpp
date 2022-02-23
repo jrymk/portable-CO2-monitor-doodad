@@ -19,12 +19,15 @@ SoftwareSerial co2Sensor(7, 8);
 
 GxEPD2_BW<GxEPD2_290, GxEPD2_290::HEIGHT> display(GxEPD2_290(/*CS=D8*/ 10, /*DC=D3*/ 4, /*RST=D4*/ 3, /*BUSY=D2*/ 2)); // GDEM029T94
 
-uint32_t previousSensorUpdateTimestamp = 0;
-uint32_t previousDisplayFullRefreshTimestamp = 0;
-uint16_t history[296];
-uint16_t historyTapePosition = 295;
+uint32_t previous4Sec = 0;
+uint32_t previous2Min = 0;
+uint16_t historyPer4Sec[296];
+uint16_t historyPer4SecTapePosition = 295;
+uint16_t historyPer2Min[296];
+uint16_t historyPer2MinTapePosition = 295;
 
 bool firstDataEntry = true;
+bool show2Min = true;
 
 void setup()
 {
@@ -59,10 +62,11 @@ void setup()
 
   for (int i = 0; i < 296; i++)
   {
-    history[i] = 400;
+    historyPer4Sec[i] = 400;
+    historyPer2Min[i] = 400;
   }
 
-  delay(1000); 
+  delay(1000);
 
   display.clearScreen(GxEPD_WHITE);
   do
@@ -87,9 +91,9 @@ void loop()
     }
   }
 
-  if (millis() - previousSensorUpdateTimestamp > 4000)
+  if (millis() - previous4Sec > 4000)
   {
-    previousSensorUpdateTimestamp += 4000;
+    previous4Sec += 4000;
 
     DEBUG_PRINT("Reading from CO2 sensor\n");
     co2Sensor.listen();
@@ -125,10 +129,16 @@ void loop()
         co2SensorStatus = sensorStatus;
         co2SensorPpm = co2Ppm;
 
-        if (millis() - previousDisplayFullRefreshTimestamp >= 120000)
+        if (millis() - previous2Min >= 120000)
         {
-          previousDisplayFullRefreshTimestamp += 120000;
+          previous2Min += 120000;
           display.setFullWindow();
+
+          historyPer2MinTapePosition++;
+          if (historyPer2MinTapePosition == 296)
+            historyPer2MinTapePosition = 0;
+
+          historyPer4Sec[historyPer2MinTapePosition] = co2Ppm;
         }
         else
         {
@@ -144,15 +154,16 @@ void loop()
           firstDataEntry = false;
           for (int i = 0; i < 296; i++)
           {
-            history[i] = co2Ppm;
+            historyPer4Sec[i] = co2Ppm;
+            historyPer2Min[i] = co2Ppm;
           }
         }
 
-        historyTapePosition++;
-        if (historyTapePosition == 296)
-          historyTapePosition = 0;
+        historyPer4SecTapePosition++;
+        if (historyPer4SecTapePosition == 296)
+          historyPer4SecTapePosition = 0;
 
-        history[historyTapePosition] = co2Ppm;
+        historyPer4Sec[historyPer4SecTapePosition] = co2Ppm;
 
         do
         {
@@ -166,38 +177,68 @@ void loop()
           display.setCursor(utx, uty);
           display.print(ss.str().c_str());
 
-          uint16_t highestPoint = 0;
-          uint16_t lowestPoint = 0;
-          uint16_t mx = 0;
-          uint16_t mn = 10001;
-
-          for (int i = 0; i < 296; i++)
+          if (show2Min)
           {
-            if (history[((historyTapePosition - i) + 296) % 296] > mx)
-            {
-              mx = history[((historyTapePosition - i) + 296) % 296];
-              highestPoint = ((historyTapePosition - i) + 296) % 296;
-            }
-            if (history[((historyTapePosition - i) + 296) % 296] < mn)
-            {
-              mn = history[((historyTapePosition - i) + 296) % 296];
-              lowestPoint = ((historyTapePosition - i) + 296) % 296;
-            }
-          }
+            show2Min = false;
+            uint16_t highestPoint = 0;
+            uint16_t mx = 0;
 
-          for (int i = 0; i < 296; i++)
+            for (int i = 0; i < 296; i++)
+            {
+              if (historyPer2Min[((historyPer2MinTapePosition - i) + 296) % 296] > mx)
+              {
+                mx = historyPer2Min[((historyPer2MinTapePosition - i) + 296) % 296];
+                highestPoint = ((historyPer2MinTapePosition - i) + 296) % 296;
+              }
+            }
+
+            for (int i = 0; i < 296; i++)
+            {
+              uint16_t pos = map(historyPer2Min[((historyPer2MinTapePosition - i) + 296) % 296], 400, mx, 127, 63);
+              display.drawFastVLine(295 - i, pos, 128 - pos, GxEPD_BLACK);
+            }
+
+            display.setFont(&PlusJakartaSans_Medium6pt7b);
+            display.fillRect(0, 63, 30, 12, GxEPD_WHITE);
+            display.setCursor(0, 72);
+            display.print(mx);
+            display.fillRect(0, 117, 24, 12, GxEPD_BLACK);
+            display.setCursor(0, 126);
+            display.setTextColor(GxEPD_WHITE);
+            display.print("10h");
+            display.setTextColor(GxEPD_BLACK);
+          }
+          else
           {
-            uint16_t pos = map(history[((historyTapePosition - i) + 296) % 296], mn, mx, 127, 63);
-            display.drawFastVLine(295 - i, pos, 128 - pos, GxEPD_BLACK);
-          }
+            show2Min = true;
+            uint16_t highestPoint = 0;
+            uint16_t mx = 0;
 
-          display.setFont(&PlusJakartaSans_Medium6pt7b);
-          display.fillRect(0, 63, 30, 12, GxEPD_WHITE);
-          display.setCursor(0, 72);
-          display.print(mx);
-          display.fillRect(0, 117, 30, 12, GxEPD_WHITE);
-          display.setCursor(0, 126);
-          display.print(mn);
+            for (int i = 0; i < 296; i++)
+            {
+              if (historyPer4Sec[((historyPer4SecTapePosition - i) + 296) % 296] > mx)
+              {
+                mx = historyPer4Sec[((historyPer4SecTapePosition - i) + 296) % 296];
+                highestPoint = ((historyPer4SecTapePosition - i) + 296) % 296;
+              }
+            }
+
+            for (int i = 0; i < 296; i++)
+            {
+              uint16_t pos = map(historyPer4Sec[((historyPer4SecTapePosition - i) + 296) % 296], 400, mx, 127, 63);
+              display.drawFastVLine(295 - i, pos, 128 - pos, GxEPD_BLACK);
+            }
+
+            display.setFont(&PlusJakartaSans_Medium6pt7b);
+            display.fillRect(0, 63, 30, 12, GxEPD_WHITE);
+            display.setCursor(0, 72);
+            display.print(mx);
+            display.fillRect(0, 117, 24, 12, GxEPD_BLACK);
+            display.setCursor(0, 126);
+            display.setTextColor(GxEPD_WHITE);
+            display.print("20m");
+            display.setTextColor(GxEPD_BLACK);
+          }
 
           display.nextPage();
         } while (display.nextPage());
@@ -208,33 +249,6 @@ void loop()
 
         co2SensorStatus = -1;
         co2SensorPpm = -1;
-
-        if (millis() - previousDisplayFullRefreshTimestamp >= 120000)
-        {
-          previousDisplayFullRefreshTimestamp += 120000;
-          display.setFullWindow();
-        }
-        else
-        {
-          display.setPartialWindow(0, 0, display.width(), display.height());
-        }
-        display.fillScreen(GxEPD_WHITE);
-        display.setCursor(50, 100);
-        std::stringstream ss;
-        ss << "broken";
-
-        display.setFont(&PlusJakartaSans_Medium26pt7b);
-        int16_t tbx, tby;
-        uint16_t tbw, tbh;
-        display.getTextBounds(ss.str().c_str(), 0, 0, &tbx, &tby, &tbw, &tbh);
-        uint16_t utx = ((display.width() - tbw) / 2) - tbx;
-        uint16_t uty = ((display.height() / 2) - tbh / 2) - tby;
-        do
-        {
-          display.setCursor(utx, uty);
-          display.print(ss.str().c_str());
-          display.nextPage();
-        } while (display.nextPage());
       }
     }
     else
