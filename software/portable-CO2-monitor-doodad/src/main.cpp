@@ -138,7 +138,7 @@ void loop()
           if (historyPer2MinTapePosition == 296)
             historyPer2MinTapePosition = 0;
 
-          historyPer4Sec[historyPer2MinTapePosition] = co2Ppm;
+          historyPer2Min[historyPer2MinTapePosition] = co2Ppm;
         }
         else
         {
